@@ -80,6 +80,15 @@ function slugify(s) {
 
 function nameSort(a, b) { return String(a.name).localeCompare(String(b.name)); }
 
+function calculateNodeDepth(node, depth = 0) {
+  // Recursively calculate depth from root
+  // Roots have depth 0, their children have depth 1, etc.
+  node._depth = depth;
+  for (const child of node.children) {
+    calculateNodeDepth(child, depth + 1);
+  }
+}
+
 function makeNode(id, name, levelIdx) {
   return {
     id,
@@ -855,6 +864,10 @@ roots.sort((a, b) => {
   }
 })(roots);
 
+// Calculate depth for each node (0 for roots, 1 for children, 2 for grandchildren, etc.)
+// This is used for alternating background colors in the visual hierarchy
+roots.forEach(root => calculateNodeDepth(root, 0));
+
 // ---------------- Layout: optimise per node ----------------
 function sizeLeafOptimised(node) {
   const apps = SORT_PHYSICAL_AZ ? node.apps.slice().sort((a,b)=>String(a.name).localeCompare(String(b.name))) : node.apps;
@@ -1156,7 +1169,7 @@ function placeNode(node, x, y) {
   node.x = x; node.y = y;
 
   // logical container (headerText only)
-  boxes.push({
+  const logicalBox = {
     id: `grp-${slugify(node.id)}-${slugify(node.name)}`,
     stencil: STENCIL_LOGICAL,
     x: node.x,
@@ -1165,7 +1178,15 @@ function placeNode(node, x, y) {
     height: node.height,
     headerText: node.name,
     bodyText: ""
-  });
+  };
+
+  // Add alternating background colors based on depth in hierarchy
+  // Odd depths get white background, even depths get default (no explicit background)
+  if (node._depth !== undefined && node._depth % 2 === 1) {
+    logicalBox.backgroundColor = "#FFFFFF";
+  }
+
+  boxes.push(logicalBox);
 
   const innerX = node.x + LA_PAD_X;
   const innerY = node.y + LA_PAD_TOP;

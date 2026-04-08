@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$(cat <<''EOF''\nImplement advanced hierarchical layout optimization algorithm\n\nMajor features:\n- Adaptive multi-tier algorithm selection based on node complexity\n  - Tier 0: Exhaustive enumeration for 1-2 children\n  - Tier 1: Multi-strategy MaxRects (30 combinations) for 3-8 children\n  - Tier 2: Beam search (K=12) for 9-15 children\n  - Tier 3: Genetic algorithm (pop=25, gen=60) for 16+ children\n\n- Two-pass sizing with predictive width normalization\n  - Pass 1: Natural sizing to determine max root width\n  - Pass 2: Re-sizing with predicted width awareness\n  - Cost function accounts for post-normalization whitespace\n\n- MaxRects 2D bin packing implementation\n  - 5 placement heuristics: BSSF, BLSF, BAF, BL, CP\n  - 6 sort strategies: area, height, width, perimeter, aspect ratios\n  - Optimal space utilization with minimal whitespace\n\n- Enhanced cost function\n  - Area minimization\n  - Whitespace penalty (0.4 weight in compact mode)\n  - Aspect ratio targeting (ISO √2 ratio)\n  - Predictive final width optimization for root nodes\n\n- Visual improvements\n  - 60px page margin around background layer\n  - Optimized horizontal/vertical layout selection for 2-child nodes\n  - Proper root width normalization handling\n\nPerformance: <2 seconds for typical hierarchies, deterministic output\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(git push:*)",
+      "Bash(git fetch:*)",
+      "Bash(node:*)",
+      "Bash(python3:*)"
+    ],
+    "deny": [],
+    "ask": []
+  },
+  "outputStyle": "default"
+}

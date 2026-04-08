@@ -1,0 +1,186 @@
+{
+  "name": "APM Rendering Agent - Overlays",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "e5a7ae84-f068-4b14-afac-76e63285340b",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "resource": "graphDb",
+        "cypherQuery": "=MATCH (APM:ApplicationPortfolioModel)\nRETURN \n  APM.diagram as diagram"
+      },
+      "type": "n8n-nodes-neo4j.neo4j",
+      "typeVersion": 1,
+      "position": [
+        224,
+        0
+      ],
+      "id": "398ad06d-eb02-475e-a4e8-5b90b0edf830",
+      "name": "ExecuteQuery graphDb",
+      "executeOnce": false,
+      "alwaysOutputData": false,
+      "credentials": {
+        "neo4jApi": {
+          "id": "raKiDnFaS75p5tDT",
+          "name": "Neo4j account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "variables": {
+          "values": [
+            {
+              "name": "diagramJson",
+              "value": "={{ $json.diagram }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.setVariable",
+      "typeVersion": 1,
+      "position": [
+        360,
+        0
+      ],
+      "id": "set-var-diagram",
+      "name": "Store Diagram Variable"
+    },
+    {
+      "parameters": {
+        "resource": "graphDb",
+        "cypherQuery": "=MATCH (pa:PhysicalApplication)\nRETURN \n  pa.displayId as DisplayID,\n  pa.name as Name,\n  pa.managementStrategy as ManagementStrategy,\n  pa.applicationSuitability as ApplicationSuitability,\n  pa.businessCriticality as BusinessCriticality,\n  pa.estimatedAnnualOPEX as EstimatedAnnualOpex"
+      },
+      "type": "n8n-nodes-neo4j.neo4j",
+      "typeVersion": 1,
+      "position": [
+        560,
+        0
+      ],
+      "id": "5b33a0e2-ecbe-4e43-b414-59f6794347b9",
+      "name": "ExecuteQuery graphDb1",
+      "executeOnce": false,
+      "alwaysOutputData": false,
+      "credentials": {
+        "neo4jApi": {
+          "id": "raKiDnFaS75p5tDT",
+          "name": "Neo4j account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "/**\n * Colour-code application boxes in a diagram given a lookup list.\n * Inputs:\n *  - diagramJsonString: the large JSON string you pasted (the diagram)\n *  - lookupArray: an array of objects with keys:\n *      DisplayID (e.g., \"APP006\"), Name, ManagementStrategy,\n *      ApplicationSuitability (1..5, may be \"3.5\"), BusinessCriticality (1..5),\n *      EstimatedAnnualOpex (number or numeric string)\n *\n * Outputs:\n *  {\n *    byStrategy:   <diagram object coloured by ManagementStrategy>,\n *    bySuitability:<diagram object coloured by ApplicationSuitability>,\n *    byCriticality:<diagram object coloured by BusinessCriticality>,\n *    byOpex:       <diagram object coloured by EstimatedAnnualOpex>\n *  }\n */\nfunction colourCodeDiagrams(diagramJsonString, lookupArray) {\n  // --- Parse and clone helpers ------------------------------------------------\n  const parseDiagram = (s) => {\n    if (typeof s === 'string') return JSON.parse(s);\n    return s;\n  };\n  const deepClone = (obj) => JSON.parse(JSON.stringify(obj));\n\n  const diagram = parseDiagram(diagramJsonString);\n\n  // --- Index the lookup by DisplayID (APPnnn) and by Name ---------------------\n  const normaliseId = (s) => String(s || '').trim().toUpperCase();\n  const normaliseName = (s) => String(s || '').trim().toLowerCase();\n\n  const byId = new Map();\n  const byName = new Map();\n  for (const row of lookupArray || []) {\n    const id = normaliseId(row.DisplayID);\n    const nm = normaliseName(row.Name);\n    if (id) byId.set(id, row);\n    if (nm) byName.set(nm, row);\n  }\n\n  // --- Extract APPnnn from a diagram box id (e.g., \"app-bus-...-app006-...\") --\n  const extractDisplayIdFromBoxId = (boxId) => {\n    const m = String(boxId || '').match(/app(\\d{3})/i);\n    if (!m) return null;\n    return `APP${m[1]}`;\n  };\n\n  // --- Find the matching lookup row for a box ---------------------------------\n  const findLookupForBox = (box) => {\n    // Try by APPnnn in id\n    const appId = extractDisplayIdFromBoxId(box.id);\n    if (appId && byId.has(appId)) return byId.get(appId);\n\n    // Fallback by Name (bodyText)\n    const nm = normaliseName(box.bodyText);\n    if (nm && byName.has(nm)) return byName.get(nm);\n\n    return null;\n  };\n\n  // --- Colour utilities -------------------------------------------------------\n  const clamp = (v, min, max) => Math.max(min, Math.min(max, v));\n\n  // Interpolate two hex colours (sRGB) t in [0,1]\n  function lerpHex(a, b, t) {\n    const pa = hexToRgb(a), pb = hexToRgb(b);\n    const r = Math.round(pa.r + (pb.r - pa.r) * t);\n    const g = Math.round(pa.g + (pb.g - pa.g) * t);\n    const bl = Math.round(pa.b + (pb.b - pa.b) * t);\n    return rgbToHex(r, g, bl);\n  }\n  function hexToRgb(hex) {\n    const h = hex.replace('#', '');\n    const bigint = parseInt(h, 16);\n    return { r: (bigint >> 16) & 255, g: (bigint >> 8) & 255, b: bigint & 255 };\n  }\n  function rgbToHex(r, g, b) {\n    return '#' + [r, g, b].map((x) => x.toString(16).padStart(2, '0')).join('');\n  }\n\n  // Sequential scale: light → dark (adjust endpoints if you like)\n  const SEQ_START = '#e6f0ff'; // light\n  const SEQ_END   = '#003b8f'; // dark\n\n  // Map 1..5 (or any numeric range) to a colour along the sequential scale\n  function scaledColour(value, min, max) {\n    if (value == null || isNaN(value)) return '#D1D5DB'; // neutral grey for N/A\n    const t = clamp((Number(value) - min) / (max - min || 1), 0, 1);\n    return lerpHex(SEQ_START, SEQ_END, t);\n  }\n\n  // Categorical palette for Management Strategy (edit as needed)\n  const STRAT_COLOURS = {\n    Resolve:  '#ef4444', // red\n    Mitigate: '#f59e0b', // amber\n    Optimise: '#10b981', // green\n    Retire:   '#6b7280', // grey\n    Tolerate: '#3b82f6', // blue\n  };\n  const DEFAULT_CAT = '#D1D5DB'; // neutral grey for unknown categories\n\n  // --- Calculate domain extents for numeric scales ----------------------------\n  // Suitability and Criticality are on 1..5, but we will compute from data to be safe.\n  let minSuit = +Infinity, maxSuit = -Infinity;\n  let minCrit = +Infinity, maxCrit = -Infinity;\n  let minOpex = +Infinity, maxOpex = -Infinity;\n\n  for (const row of lookupArray || []) {\n    const s = parseFloat(row.ApplicationSuitability);\n    const c = parseFloat(row.BusinessCriticality);\n    const o = parseFloat(row.EstimatedAnnualOpex);\n\n    if (!isNaN(s)) { minSuit = Math.min(minSuit, s); maxSuit = Math.max(maxSuit, s); }\n    if (!isNaN(c)) { minCrit = Math.min(minCrit, c); maxCrit = Math.max(maxCrit, c); }\n    if (!isNaN(o)) { minOpex = Math.min(minOpex, o); maxOpex = Math.max(maxOpex, o); }\n  }\n  // Sensible fallbacks if data are missing\n  if (!isFinite(minSuit)) { minSuit = 1; maxSuit = 5; }\n  if (!isFinite(minCrit)) { minCrit = 1; maxCrit = 5; }\n  if (!isFinite(minOpex)) { minOpex = 0; maxOpex = 1; }\n\n  // --- Core colour-application function --------------------------------------\n  function colourise(clone, colourPicker) {\n    for (const box of clone.boxes || []) {\n      if (box.stencil !== 'physicalApplication') continue; // only colour app boxes\n      const row = findLookupForBox(box);\n      const colour = colourPicker(row);\n      if (colour) box.backgroundColor = colour;\n      else box.backgroundColor = '#D1D5DB'; // unmatched → neutral grey\n    }\n    return clone;\n  }\n\n  // --- Build the four variants ------------------------------------------------\n  const byStrategy    = colourise(deepClone(diagram), (row) =>\n    row ? (STRAT_COLOURS[row.ManagementStrategy] || DEFAULT_CAT) : null\n  );\n\n  const bySuitability = colourise(deepClone(diagram), (row) =>\n    row ? scaledColour(parseFloat(row.ApplicationSuitability), minSuit, maxSuit) : null\n  );\n\n  const byCriticality = colourise(deepClone(diagram), (row) =>\n    row ? scaledColour(parseFloat(row.BusinessCriticality), minCrit, maxCrit) : null\n  );\n\n  const byOpex        = colourise(deepClone(diagram), (row) =>\n    row ? scaledColour(parseFloat(row.EstimatedAnnualOpex), minOpex, maxOpex) : null\n  );\n\n  return { byStrategy, bySuitability, byCriticality, byOpex };\n}\n\n// ------------------------------\n// Example usage:\n//\n// const diagramJsonString = `...` // your huge JSON string from the prompt\n// const lookupArray = [ { DisplayID:\"APP005\", Name:\"AB Note\", ... }, ... ];\n//\n// const { byStrategy, bySuitability, byCriticality, byOpex } = colourCodeDiagrams(diagramJsonString, lookupArray);\n//\n// // If you need strings again:\n// const out1 = JSON.stringify(byStrategy);\n// const out2 = JSON.stringify(bySuitability);\n// const out3 = JSON.stringify(byCriticality);\n// const out4 = JSON.stringify(byOpex);\n//\n// console.log(out1, out2, out3, out4);\n// ------------------------------"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1072,
+        0
+      ],
+      "id": "45720758-8249-479d-bb8d-3bb80a9ac0bd",
+      "name": "Overlay Generation"
+    },
+    {
+      "parameters": {
+        "jsCode": "/************************************************************\n * Application-Colour-Mapper (all-in-one)\n * Input:  many DB items  (DisplayID, Name, ManagementStrategy, etc.)\n * Output:  4 items  (by Strategy, Suitability, Criticality, Opex)\n ************************************************************/\n\n// ====== 1. CONFIGURATION ==================================\n// Diagram JSON is retrieved from workflow variable set by 'Store Diagram Variable' node\nconst DIAGRAM_JSON = $workflowData.variables.diagramJson;\nif (!DIAGRAM_JSON) {\n  throw new Error('Diagram variable not set. Ensure Store Diagram Variable node executed successfully.');\n}\n// If diagram is already a string, use it; if it's an object, stringify it\nconst diagramToUse = typeof DIAGRAM_JSON === 'string' ? DIAGRAM_JSON : JSON.stringify(DIAGRAM_JSON);\n\n\nconst STRAT_COLOURS = {\n  Resolve:  '#ef4444',\n  Mitigate: '#f59e0b',\n  Optimise: '#10b981',\n  Retire:   '#6b7280',\n  Tolerate: '#3b82f6',\n  Divest:   '#8b5cf6',   // violet\n};\nconst NEUTRAL = '#D1D5DB';\nconst SEQ_START = '#e6f0ff'; // light\nconst SEQ_END   = '#003b8f'; // dark\n// ===========================================================\n\n\n// ---- 2. BUILD LOOKUP ARRAY FROM 309 DB ROWS ---------------\nfunction num(x){ const n = Number(x); return Number.isFinite(n)?n:undefined; }\nfunction txt(x){ return x == null ? undefined : String(x).trim(); }\n\nconst lookup = items.map(({json}) => ({\n  DisplayID: txt(json.DisplayID)?.toUpperCase(),\n  Name: txt(json.Name),\n  ManagementStrategy: txt(json.ManagementStrategy),\n  ApplicationSuitability: num(json.ApplicationSuitability),\n  BusinessCriticality: num(json.BusinessCriticality),\n  EstimatedAnnualOpex: num(json.EstimatedAnnualOpex),\n}));\n\n\n// ---- 3. HELPER UTILITIES ---------------------------------\nconst normId   = s => String(s||'').trim().toUpperCase();\nconst normName = s => String(s||'').trim().toLowerCase();\nconst clamp = (v,a,b)=>Math.max(a,Math.min(b,v));\n\nconst hexToRgb = h=>{\n  const n=parseInt(h.replace('#',''),16);\n  return {r:(n>>16)&255,g:(n>>8)&255,b:n&255};\n};\nconst rgbToHex=(r,g,b)=>\n  '#'+[r,g,b].map(x=>x.toString(16).padStart(2,'0')).join('');\nconst lerpHex=(a,b,t)=>{\n  const A=hexToRgb(a),B=hexToRgb(b);\n  const r=Math.round(A.r+(B.r-A.r)*t);\n  const g=Math.round(A.g+(B.g-A.g)*t);\n  const bl=Math.round(A.b+(B.b-A.b)*t);\n  return rgbToHex(r,g,bl);\n};\nconst scaleColour=(x,min,max)=>\n  isNaN(x)?NEUTRAL:lerpHex(SEQ_START,SEQ_END,clamp((x-min)/(max-min||1),0,1));\n\n// Index lookup by DisplayID and Name\nconst byId=new Map(), byName=new Map();\nfor(const r of lookup){\n  if(r.DisplayID) byId.set(normId(r.DisplayID),r);\n  if(r.Name) byName.set(normName(r.Name),r);\n}\n\nconst idFromBox=id=>{\n  const m=String(id||'').match(/app(\\d{3})/i);\n  return m?`APP${m[1]}`:null;\n};\nfunction findRow(box){\n  const app=idFromBox(box.id);\n  if(app&&byId.has(app)) return byId.get(app);\n  const nm=normName(box.bodyText);\n  return byName.get(nm);\n}\n\n\n// ---- 4. DOMAIN CALCULATIONS -------------------------------\nlet minS=Infinity,maxS=-Infinity,minC=Infinity,maxC=-Infinity,minO=Infinity,maxO=-Infinity;\nfor(const r of lookup){\n  const s=r.ApplicationSuitability,c=r.BusinessCriticality,o=r.EstimatedAnnualOpex;\n  if(!isNaN(s)){minS=Math.min(minS,s);maxS=Math.max(maxS,s);}\n  if(!isNaN(c)){minC=Math.min(minC,c);maxC=Math.max(maxC,c);}\n  if(!isNaN(o)){minO=Math.min(minO,o);maxO=Math.max(maxO,o);}\n}\nif(!isFinite(minS)){minS=1;maxS=5;}\nif(!isFinite(minC)){minC=1;maxC=5;}\nif(!isFinite(minO)){minO=0;maxO=1;}\n\n\n// ---- 5. COLOURING FUNCTION --------------------------------\nfunction applyColours(diagram,picker){\n  const d=typeof diagram==='string'?JSON.parse(diagram):structuredClone(diagram);\n  for(const box of d.boxes||[]){\n    if(box.stencil!=='physicalApplication') continue;\n    const row=findRow(box);\n    box.backgroundColor=picker(row);\n  }\n  return d;\n}\n\n\n// ---- 6. GENERATE VARIANTS ---------------------------------\nconst diagramObj = JSON.parse(DIAGRAM_JSON);\n\nconst byStrategy = applyColours(diagramObj, r =>\n  r ? (STRAT_COLOURS[r.ManagementStrategy] ?? NEUTRAL) : NEUTRAL\n);\nconst bySuitability = applyColours(diagramObj, r =>\n  r ? scaleColour(r.ApplicationSuitability, minS, maxS) : NEUTRAL\n);\nconst byCriticality = applyColours(diagramObj, r =>\n  r ? scaleColour(r.BusinessCriticality, minC, maxC) : NEUTRAL\n);\nconst byOpex = applyColours(diagramObj, r =>\n  r ? scaleColour(r.EstimatedAnnualOpex, minO, maxO) : NEUTRAL\n);\n\n\n// ---- 7. RETURN FOUR ITEMS ---------------------------------\nreturn [\n  {json:{view:'ManagementStrategy',diagram:byStrategy}},\n  {json:{view:'ApplicationSuitability',diagram:bySuitability}},\n  {json:{view:'BusinessCriticality',diagram:byCriticality}},\n  {json:{view:'EstimatedAnnualOpex',diagram:byOpex}},\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        704,
+        0
+      ],
+      "id": "1f9a94cb-7cdb-4cc8-b7ac-d6c2274216ca",
+      "name": "Normalise Data"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "ExecuteQuery graphDb",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ExecuteQuery graphDb": {
+      "main": [
+        [
+          {
+            "node": "Store Diagram Variable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Diagram Variable": {
+      "main": [
+        [
+          {
+            "node": "ExecuteQuery graphDb1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ExecuteQuery graphDb1": {
+      "main": [
+        [
+          {
+            "node": "Normalise Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Overlay Generation": {
+      "main": [
+        []
+      ]
+    },
+    "Normalise Data": {
+      "main": [
+        [
+          {
+            "node": "Overlay Generation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "21d5ba8e-8edc-446c-83ce-97502540d107",
+  "meta": {
+    "instanceId": "bf4036c469881415b6a76e1ac267057eec6d92008462c91de9920c515bda2510"
+  },
+  "id": "3p0tUrgS6OqGFtRl",
+  "tags": [
+    {
+      "name": "Candidate",
+      "id": "MeKiTO9znXFCcGt0",
+      "createdAt": "2025-10-28T09:16:59.667Z",
+      "updatedAt": "2025-10-28T09:16:59.667Z"
+    }
+  ]
+}
